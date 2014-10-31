@@ -1,0 +1,18 @@
+These clients are compiled and you can use them to test how tftp works.
+They come compiled for two different architectures found on the schhols unix system, x86 and SPARC.
+In order to know which arcitecture you are running on type the following into a terminal
+
+uname -a
+
+then you will see something like this,
+
+SunOS hamberg.it.uu.se 5.10 Generic_148888-04 sun4u sparc SUNW,Ultra-80
+
+indicating that you are running on SPARC for example.
+
+If you are sitting in P1515 you are likely running on x86 and if you are login in via
+ssh you are likely running on SPARC.
+To run the program type
+
+./tftp_69_SPARC -g medium.pdf joshua.it.uu.se
+
