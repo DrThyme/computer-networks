@@ -74,7 +74,13 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
   /* Create a socket.
    * Check return value. */
 
-  /* ... */
+  int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
+  if (socket_fd == -1) {
+    free(tc); // Correct?
+    return NULL;
+  } else {
+    tc->sock = socket_fd;
+  }
 
   if (type == TFTP_TYPE_PUT)
     tc->fp = fopen(fname, "rb");
@@ -101,7 +107,11 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
   /* get address from host name.
    * If error, gracefully clean up.*/
 
-  /* ... */
+  int status = getaddrinfo(hostname, port_str, &hints, &res);
+  if (status == -1) {
+    free(tc);
+    return NULL;
+  }
 
   /* Assign address to the connection handle.
    * You can assume that the first address in the hostent
@@ -129,11 +139,18 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
 */
 int tftp_send_rrq(struct tftp_conn *tc)
 {
-  /* struct tftp_rrq *rrq; */
+  struct tftp_rrq rrq;
+  rrq.opcode = OPCODE_RRQ;
+  char message[BLOCK_SIZE];
+  int index = snprintf(message, BLOCK_SIZE, tc->fname);
+  index++;
+  snprintf(message + index, BLOCK_SIZE - index - 1, tc->mode);
+  snprintf(rrq.req, BLOCK_SIZE, message);
 
-  /* ... */
+  int bytes_sent = sendto(tc->sock, &rrq, TFTP_RRQ_LEN(tc->fname, tc->mode), 0,
+			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
 
-  return 0;
+  return bytes_sent;
 }
 /*
 
@@ -144,11 +161,19 @@ int tftp_send_rrq(struct tftp_conn *tc)
 */
 int tftp_send_wrq(struct tftp_conn *tc)
 {
-  /* struct tftp_wrq *wrq; */
+  struct tftp_wrq wrq;
 
-  /* ... */
+  wrq.opcode = OPCODE_WRQ;
+  char message[BLOCK_SIZE];
+  int index = snprintf(message, BLOCK_SIZE, tc->fname);
+  index++;
+  snprintf(message + index, BLOCK_SIZE - index - 1, tc->mode);
+  snprintf(wrq.req, BLOCK_SIZE, message);
 
-  return 0;
+  int bytes_sent = sendto(tc->sock, &wrq, TFTP_WRQ_LEN(tc->fname, tc->mode), 0,
+			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
+
+  return bytes_sent;
 }
 
 
@@ -160,9 +185,15 @@ int tftp_send_wrq(struct tftp_conn *tc)
 */
 int tftp_send_ack(struct tftp_conn *tc)
 {
-  /* struct tftp_ack *ack; */
+  struct tftp_ack ack;
+  
+  ack.opcode = OPCODE_ACK;
+  ack.blocknr = tc->blocknr;
 
-  return 0;
+  int bytes_sent = sendto(tc->sock, &ack, TFTP_ACK_HDR_LEN, 0,
+			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
+
+  return bytes_sent;
 }
 
 /*
@@ -180,8 +211,23 @@ int tftp_send_ack(struct tftp_conn *tc)
 */
 int tftp_send_data(struct tftp_conn *tc, int length)
 {
-  /* struct tftp_data *tdata; */
-  return 0;
+  struct tftp_data tdata;
+  
+  int bytes_sent;
+
+  if(length == -1){
+    //resend msg in buffer
+  } else {
+    tdata.opcode = OPCODE_DATA;
+    tdata.blocknr = tc->blocknr;
+
+    fread(tdata.data, length, 1, tc->fp);
+
+    
+    bytes_sent = sendto(tc->sock, &tdata, TFTP_DATA_HDR_LEN+length, 0,
+			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
+  }
+  return bytes_sent;
 }
 
 /*
@@ -295,10 +341,16 @@ int main (int argc, char **argv)
   }
 
   /* Transfer the file to or from the server */
-  retval = tftp_transfer(tc);
+  //  retval = tftp_transfer(tc);
+  tc->blocknr = 1;
+  retval = tftp_send_data(tc, 6);
 
   if (retval < 0) {
     fprintf(stderr, "File transfer failed.\n");
+  }
+
+  else {
+    fprintf(stdout, "File transfer succeeded. %d bytes sent.\n", retval);
   }
 
   /* We are done. Cleanup our state. */

@@ -19,10 +19,10 @@ default: $(TARGET)
 
 # Insert your dependencies here
 $(OBJ): $(SRC)
-	$(CC) $(DEFS) -c -o $@ $<
+	$(CC) -g $(DEFS) -c -o $@ $<
 
 $(TARGET): $(OBJ)
-	$(CC) $(DEFS) $(CLIBS) -o $@ $<
+	$(CC) -g $(DEFS) $(CLIBS) -o $@ $<
 
 depend:
 	makedepend -Y./ $(SRC) &> /dev/null
