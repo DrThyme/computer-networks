@@ -216,16 +216,18 @@ int tftp_send_data(struct tftp_conn *tc, int length)
   int bytes_sent;
 
   if(length == -1){
-    //resend msg in buffer
+    bytes_sent = sendto(tc->sock, tc->msgbuf, TFTP_DATA_HDR_LEN+length, 0,
+			(struct sockaddr *) &(tc->peer_addr), tc->addrlen);
   } else {
     tdata.opcode = OPCODE_DATA;
     tdata.blocknr = tc->blocknr;
 
     fread(tdata.data, length, 1, tc->fp);
 
-    
+    memcpy(tc->msgbuf, &tdata, TFTP_DATA_HDR_LEN+length);
+
     bytes_sent = sendto(tc->sock, &tdata, TFTP_DATA_HDR_LEN+length, 0,
-			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
+			(struct sockaddr *) &(tc->peer_addr), tc->addrlen);
   }
   return bytes_sent;
 }
@@ -247,6 +249,11 @@ int tftp_transfer(struct tftp_conn *tc)
 
   len = 0;
 
+  long int file_size;
+  fseek(tc->fp, 0L, SEEK_END);
+  file_size = ftell(tc->fp);
+  fseek(tc->fp, 0L, SEEK_SET);
+
   /* After the connection request we should start receiving data
    * immediately */
 
@@ -258,7 +265,17 @@ int tftp_transfer(struct tftp_conn *tc)
   /* Check if we are putting a file or getting a file and send
    * the corresponding request. */
 
-  /* ... */
+  if (tc->type == TFTP_TYPE_GET) {
+    retval = tftp_send_rrq(tc);
+  } else if (tc->type == TFTP_TYPE_PUT) {
+    retval = tftp_send_wrq(tc);
+  }
+
+  if (retval == -1) {
+    return retval;
+  } else {
+    totlen += retval;
+  }
 
   /*
     Put or get the file, block by block, in a loop.
@@ -269,19 +286,49 @@ int tftp_transfer(struct tftp_conn *tc)
      * or ack depending on whether we are in put or get
      * mode. */
 
-    /* ... */
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(tc->sock, &readfds);
+    select(tc->sock + 1, &readfds, NULL, NULL, &timeout);
+    if (FD_ISSET(tc->sock, &readfds)) {
+      retval = recvfrom(tc->sock, tc->msgbuf, MSGBUF_SIZE, 0,
+			(struct sockaddr *) &tc->peer_addr, &tc->addrlen);
+    } else { // Timeout
+      if (tc->type == TFTP_TYPE_PUT) {
+	retval = tftp_send_data(tc, -1);
+      } else if (tc->type == TFTP_TYPE_GET) {
+	retval = tftp_send_ack(tc);
+      }
+    }
 
     /* 2. Check the message type and take the necessary
      * action. */
-    switch ( 0 /* change for msg type */ ) {
+    u_int16_t received_opcode;
+    memcpy(&received_opcode, tc->msgbuf, sizeof(u_int16_t));
+    u_int16_t received_blocknr;
+    switch (received_opcode) {
     case OPCODE_DATA:
       /* Received data block, send ack */
+      memcpy(&received_blocknr, tc->msgbuf + sizeof(u_int16_t),
+	     sizeof(u_int16_t));
+      tc->blocknr = received_blocknr;
+      tftp_send_ack(tc);
       break;
     case OPCODE_ACK:
       /* Received ACK, send next block */
+      tc->blocknr++;
+      long int file_pos = ftell(tc->fp);
+      if (file_size - file_pos < BLOCK_SIZE) {
+	retval = tftp_send_data(tc, file_size - file_pos);
+      } else {
+	retval = tftp_send_data(tc, BLOCK_SIZE);
+      }
       break;
     case OPCODE_ERR:
       /* Handle error... */
+
+      // Do something clever
+
       break;
     default:
       fprintf(stderr, "\nUnknown message type\n");
@@ -289,7 +336,13 @@ int tftp_transfer(struct tftp_conn *tc)
 
     }
 
-  } while ( 0 /* 3. Loop until file is finished */);
+    if (retval == -1) {
+      // Handle this
+    } else {
+      totlen += retval;
+    }
+
+  } while (ftell(tc->fp) != file_size /* 3. Loop until file is finished */);
 
   printf("\nTotal data bytes sent/received: %d.\n", totlen);
  out:
@@ -341,16 +394,10 @@ int main (int argc, char **argv)
   }
 
   /* Transfer the file to or from the server */
-  //  retval = tftp_transfer(tc);
-  tc->blocknr = 1;
-  retval = tftp_send_data(tc, 6);
+  retval = tftp_transfer(tc);
 
   if (retval < 0) {
     fprintf(stderr, "File transfer failed.\n");
-  }
-
-  else {
-    fprintf(stdout, "File transfer succeeded. %d bytes sent.\n", retval);
   }
 
   /* We are done. Cleanup our state. */
