@@ -74,6 +74,7 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
   /* Create a socket.
    * Check return value. */
 
+  /* ===ADDED=== */
   int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
   if (socket_fd == -1) {
     free(tc); // Correct?
@@ -81,6 +82,7 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
   } else {
     tc->sock = socket_fd;
   }
+  /* ===END OF ADDED=== */
 
   if (type == TFTP_TYPE_PUT)
     tc->fp = fopen(fname, "rb");
@@ -107,11 +109,15 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
   /* get address from host name.
    * If error, gracefully clean up.*/
 
+  /* ===ADDED=== */
   int status = getaddrinfo(hostname, port_str, &hints, &res);
   if (status == -1) {
-    free(tc);
+    fclose(tc->fp); // Correct?
+    close(tc->sock); // Correct?
+    free(tc); // Correct?
     return NULL;
   }
+  /* ===END OF ADDED=== */
 
   /* Assign address to the connection handle.
    * You can assume that the first address in the hostent
@@ -139,9 +145,10 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
 */
 int tftp_send_rrq(struct tftp_conn *tc)
 {
-  struct tftp_rrq rrq;
+  /* ===ADDED/CHANGED=== */
+  struct tftp_rrq rrq; // Pointer instead?
   rrq.opcode = OPCODE_RRQ;
-  char message[BLOCK_SIZE];
+  char message[BLOCK_SIZE]; // Other size?
   int index = snprintf(message, BLOCK_SIZE, tc->fname);
   index++;
   snprintf(message + index, BLOCK_SIZE - index - 1, tc->mode);
@@ -151,7 +158,9 @@ int tftp_send_rrq(struct tftp_conn *tc)
 			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
 
   return bytes_sent;
+  /* ===END OF ADDED/CHANGED=== */
 }
+
 /*
 
   Send a write request to the server.
@@ -161,10 +170,10 @@ int tftp_send_rrq(struct tftp_conn *tc)
 */
 int tftp_send_wrq(struct tftp_conn *tc)
 {
-  struct tftp_wrq wrq;
-
+  /* ===ADDED/CHANGED=== */
+  struct tftp_wrq wrq; // Pointer instead?
   wrq.opcode = OPCODE_WRQ;
-  char message[BLOCK_SIZE];
+  char message[BLOCK_SIZE]; // Other size?
   int index = snprintf(message, BLOCK_SIZE, tc->fname);
   index++;
   snprintf(message + index, BLOCK_SIZE - index - 1, tc->mode);
@@ -174,8 +183,8 @@ int tftp_send_wrq(struct tftp_conn *tc)
 			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
 
   return bytes_sent;
+  /* ===END OF ADDED/CHANGED=== */
 }
-
 
 /*
   Acknowledge reception of a block.
