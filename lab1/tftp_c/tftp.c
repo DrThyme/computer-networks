@@ -269,7 +269,7 @@ int tftp_transfer(struct tftp_conn *tc)
   int totlen = 0;
   struct timeval timeout;
 
-  int loopend = 0;
+  int loopend = 1;
 
   /* Sanity check */
   if (!tc)
@@ -299,7 +299,7 @@ int tftp_transfer(struct tftp_conn *tc)
 //reconnect:
   if (tc->type == TFTP_TYPE_GET) {
     retval = tftp_send_rrq(tc);
-    fseek(tc->fp, 4, SEEK_SET); //Should it be here?
+    //    fseek(tc->fp, 4, SEEK_SET); //Should it be here?
   } else if (tc->type == TFTP_TYPE_PUT) {
     retval = tftp_send_wrq(tc);
   }
@@ -311,7 +311,7 @@ int tftp_transfer(struct tftp_conn *tc)
   }
   /* ===END OF ADDED=== */
 
-  long int last_file_pos = 4;
+  long int last_file_pos = 0;
   /*
     Put or get the file, block by block, in a loop.
   */
@@ -351,23 +351,23 @@ int tftp_transfer(struct tftp_conn *tc)
      * action. */
 
     /* ===ADDED/CHANGED=== */
-    u_int16_t received_opcode;
-    memcpy(&received_opcode, tc->msgbuf, sizeof(u_int16_t));
-    u_int16_t received_blocknr;
-    
+    //u_int16_t *p = (u_int16_t*)tc->msgbuf;
+    u_int16_t received_opcode = htons(*((u_int16_t*)tc->msgbuf));
+    //memcpy(&received_opcode, tc->msgbuf, sizeof(u_int16_t));
+
+    struct tftp_data *data;
+
     switch (received_opcode) {
     case OPCODE_DATA:
       /* Received data block, send ack */
-      memcpy(&received_blocknr, tc->msgbuf + sizeof(u_int16_t),
-	     sizeof(u_int16_t));
-      char to_write[BLOCK_SIZE];
-      fwrite(to_write, BLOCK_SIZE, 1, tc->fp);
+      data = (struct tftp_data *) tc->msgbuf;
+      fwrite(data->data, BLOCK_SIZE, 1, tc->fp);
       long int file_w_pos = ftell(tc->fp);
-      if((file_w_pos - last_file_pos) <= BLOCK_SIZE) {
-        loopend = 1;
+      if((file_w_pos - last_file_pos) < BLOCK_SIZE) {
+        loopend = 0;
       }
       last_file_pos = file_w_pos;
-      tc->blocknr = received_blocknr;
+      tc->blocknr = ntohs(data->blocknr);
       tftp_send_ack(tc);
       break;
     case OPCODE_ACK:
@@ -376,7 +376,7 @@ int tftp_transfer(struct tftp_conn *tc)
       long int file_pos = ftell(tc->fp);
       if (file_size - file_pos < BLOCK_SIZE) {
 	     retval = tftp_send_data(tc, file_size - file_pos);
-       loopend = 1;
+	     loopend = 0;
       } else {
 	     retval = tftp_send_data(tc, BLOCK_SIZE);
       }
