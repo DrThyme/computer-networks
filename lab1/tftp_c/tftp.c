@@ -313,7 +313,7 @@ int tftp_transfer(struct tftp_conn *tc)
   }
   /* ===END OF ADDED=== */
 
-  long int last_file_pos = 0;
+  //long int last_file_pos = 0;
   /*
     Put or get the file, block by block, in a loop.
   */
@@ -363,15 +363,26 @@ int tftp_transfer(struct tftp_conn *tc)
     case OPCODE_DATA:
       /* Received data block, send ack */
       data = (struct tftp_data *) tc->msgbuf;
-      fwrite(data->data, BLOCK_SIZE, 1, tc->fp);
-      long int file_w_pos = ftell(tc->fp);
-      if((file_w_pos - last_file_pos) < BLOCK_SIZE) {
+      len = strlen(data->data);
+      if(len == BLOCK_SIZE+2){ //find better solution...
+      	len = len-2;
+      }
+     
+      long int cur_pos = ftell(tc->fp);
+      fwrite(data->data, len, 1, tc->fp);
+      long int new_pos = ftell(tc->fp);
+      int bytes_written = new_pos - cur_pos;
+      if(bytes_written < BLOCK_SIZE) {
         loopend = 0;
       }
-      last_file_pos = file_w_pos;
+      printf("size check: %d\n", bytes_written);
+      //printf("length check: %ld\n", (file_w_pos - last_file_pos));
+      //last_file_pos = file_w_pos;
       tc->blocknr = ntohs(data->blocknr);
-      printf("block %u\n", tc->blocknr);
+      //printf("block %u\n", tc->blocknr);
       tftp_send_ack(tc);
+      memset(data->data, '\0', sizeof(data->data));
+      memset(tc->msgbuf, '\0', sizeof(tc->msgbuf));
       break;
     case OPCODE_ACK:
       /* Received ACK, send next block */
