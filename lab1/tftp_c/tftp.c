@@ -206,7 +206,7 @@ int tftp_send_ack(struct tftp_conn *tc)
 
   /* ===ADDED/CHANGED=== */
   struct tftp_ack *ack;
-  ack = malloc(TFTP_ACK_HDR_LEN);
+  ack = malloc(TFTP_ACK_HDR_LEN); // Probably not necessary to use malloc here
 
   
   ack->opcode = htons(OPCODE_ACK);
@@ -343,7 +343,7 @@ int tftp_transfer(struct tftp_conn *tc)
         if(tc->blocknr == 0){
           //goto reconnect; //danger of flooding
         } else {
-          retval = tftp_send_ack(tc);
+          retval = tftp_send_ack(tc); // Correct?
         } 
       }
     }
@@ -370,6 +370,7 @@ int tftp_transfer(struct tftp_conn *tc)
       }
       last_file_pos = file_w_pos;
       tc->blocknr = ntohs(data->blocknr);
+      printf("block %u\n", tc->blocknr);
       tftp_send_ack(tc);
       break;
     case OPCODE_ACK:
