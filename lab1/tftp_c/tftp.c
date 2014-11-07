@@ -148,7 +148,9 @@ struct tftp_conn *tftp_connect(int type, char *fname, char *mode,
 int tftp_send_rrq(struct tftp_conn *tc)
 {
   /* ===ADDED/CHANGED=== */
+  //buf[1024];
   struct tftp_rrq *rrq; // Pointer instead?
+  //rrq = (struct tftp_rrq*)buf;
   rrq = malloc(TFTP_RRQ_LEN(tc->fname,tc->mode));
 
   rrq->opcode = htons(OPCODE_RRQ);
