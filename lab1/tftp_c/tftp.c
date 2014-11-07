@@ -201,8 +201,11 @@ int tftp_send_wrq(struct tftp_conn *tc)
 */
 int tftp_send_ack(struct tftp_conn *tc)
 {
+
+  /* ===ADDED/CHANGED=== */
   struct tftp_ack *ack;
   ack = malloc(TFTP_ACK_HDR_LEN);
+
   
   ack->opcode = htons(OPCODE_ACK);
   ack->blocknr = htons(tc->blocknr);
@@ -212,6 +215,7 @@ int tftp_send_ack(struct tftp_conn *tc)
 
   free(ack);
   return bytes_sent;
+  /* ===END OF ADDED/CHANGED=== */
 }
 
 /*
@@ -229,6 +233,7 @@ int tftp_send_ack(struct tftp_conn *tc)
 */
 int tftp_send_data(struct tftp_conn *tc, int length)
 {
+  /* ===ADDED/CHANGED=== */
   struct tftp_data *tdata;
   tdata = malloc(TFTP_DATA_HDR_LEN+length);
   
@@ -250,6 +255,7 @@ int tftp_send_data(struct tftp_conn *tc, int length)
   }
   free(tdata);
   return bytes_sent;
+  /* ===END OF ADDED/CHANGED=== */
 }
 
 /*
@@ -269,12 +275,14 @@ int tftp_transfer(struct tftp_conn *tc)
   if (!tc)
     return -1;
 
-  len = 0;
+  len = 0; // To be used for what?
 
+  /* ===ADDED (NOT ACCORDING TO INSTRUCTIONS)=== */
   long int file_size;
   fseek(tc->fp, 0L, SEEK_END);
   file_size = ftell(tc->fp);
   fseek(tc->fp, 0L, SEEK_SET);
+  /* ===END OF ADDED=== */
 
   /* After the connection request we should start receiving data
    * immediately */
@@ -286,6 +294,8 @@ int tftp_transfer(struct tftp_conn *tc)
 
   /* Check if we are putting a file or getting a file and send
    * the corresponding request. */
+
+  /* ===ADDED=== */
 //reconnect:
   if (tc->type == TFTP_TYPE_GET) {
     retval = tftp_send_rrq(tc);
@@ -299,6 +309,7 @@ int tftp_transfer(struct tftp_conn *tc)
   } else {
     totlen += retval;
   }
+  /* ===END OF ADDED=== */
 
   long int last_file_pos = 4;
   /*
@@ -311,6 +322,7 @@ int tftp_transfer(struct tftp_conn *tc)
      * or ack depending on whether we are in put or get
      * mode. */
 
+    /* ===ADDED=== */
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(tc->sock, &readfds);
@@ -333,10 +345,12 @@ int tftp_transfer(struct tftp_conn *tc)
         } 
       }
     }
+    /* ===END OF ADDED=== */
 
     /* 2. Check the message type and take the necessary
      * action. */
-    
+
+    /* ===ADDED/CHANGED=== */
     u_int16_t received_opcode;
     memcpy(&received_opcode, tc->msgbuf, sizeof(u_int16_t));
     u_int16_t received_blocknr;
@@ -373,19 +387,24 @@ int tftp_transfer(struct tftp_conn *tc)
       // Do something clever
 
       break;
+    /* ===END OF ADDED/CHANGED=== */
     default:
       fprintf(stderr, "\nUnknown message type\n");
       goto out;
 
     }
 
+    /* ===ADDED=== */
     if (retval == -1) {
       // Handle this
     } else {
       totlen += retval;
     }
+    /* ===END OF ADDED=== */
 
+    /* ===CHANGED=== */
   } while (loopend /* 3. Loop until file is finished */);
+  /* ===END OF CHANGED=== */
 
   printf("\nTotal data bytes sent/received: %d.\n", totlen);
  out:
