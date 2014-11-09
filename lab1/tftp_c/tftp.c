@@ -215,6 +215,7 @@ int tftp_send_ack(struct tftp_conn *tc)
   int bytes_sent = sendto(tc->sock, ack, TFTP_ACK_HDR_LEN, 0,
 			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
 
+  printf("sent ack: %d\n", tc->blocknr);
   free(ack);
   return bytes_sent;
   /* ===END OF ADDED/CHANGED=== */
@@ -251,7 +252,10 @@ int tftp_send_data(struct tftp_conn *tc, int length)
     fread(tdata->data, length, 1, tc->fp);
 
     memcpy(tc->msgbuf, tdata, TFTP_DATA_HDR_LEN+length);
-
+    //int index = snprintf(tc->msgbuf, MSGBUF_SIZE, "%d", tdata->opcode);
+    //int index2 = snprintf(tc->msgbuf+index, MSGBUF_SIZE-index, "%d", tdata->blocknr);
+    //snprintf(tc->msgbuf+index+index2, BLOCK_SIZE, "%s", tdata->data);
+    printf("msgbuf: %d\n", sizeof(tc->msgbuf));
     bytes_sent = sendto(tc->sock, tdata, TFTP_DATA_HDR_LEN+length, 0,
 			(struct sockaddr *) &(tc->peer_addr), tc->addrlen);
   }
@@ -298,10 +302,8 @@ int tftp_transfer(struct tftp_conn *tc)
    * the corresponding request. */
 
   /* ===ADDED=== */
-//reconnect:
   if (tc->type == TFTP_TYPE_GET) {
     retval = tftp_send_rrq(tc);
-    //    fseek(tc->fp, 4, SEEK_SET); //Should it be here?
   } else if (tc->type == TFTP_TYPE_PUT) {
     retval = tftp_send_wrq(tc);
   }
@@ -318,12 +320,14 @@ int tftp_transfer(struct tftp_conn *tc)
     Put or get the file, block by block, in a loop.
   */
 
+  int i = 0;
+ reloop:
   do {
     /* 1. Wait for something from the server (using
      * 'select'). If a timeout occurs, resend last block
      * or ack depending on whether we are in put or get
      * mode. */
-
+    printf("=== loop nr: %d ===\n", i++);
     /* ===ADDED=== */
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -338,12 +342,15 @@ int tftp_transfer(struct tftp_conn *tc)
           //goto reconnect; //danger of flooding
         } else {
           retval = tftp_send_data(tc, -1);
+	  printf("reloop -- tc: %d\n", tc->blocknr);
+	  goto reloop;
         }
       } else if (tc->type == TFTP_TYPE_GET) {
         if(tc->blocknr == 0){
           //goto reconnect; //danger of flooding
         } else {
           retval = tftp_send_ack(tc); // Correct?
+	  goto reloop;
         } 
       }
     }
@@ -355,48 +362,60 @@ int tftp_transfer(struct tftp_conn *tc)
     /* ===ADDED/CHANGED=== */
     //u_int16_t *p = (u_int16_t*)tc->msgbuf;
     u_int16_t received_opcode = htons(*((u_int16_t*)tc->msgbuf));
+    //printf("received_opcode: %d\n", received_opcode);
     //memcpy(&received_opcode, tc->msgbuf, sizeof(u_int16_t));
 
+    u_int16_t received_blocknr;
     struct tftp_data *data;
+    struct tftp_ack *ack_recv;
 
     switch (received_opcode) {
     case OPCODE_DATA:
       /* Received data block, send ack */
       data = (struct tftp_data *) tc->msgbuf;
-      len = strlen(data->data);
-      if(len == BLOCK_SIZE+2){ //find better solution...
-      	len = len-2;
+      len = retval - 4;
+      received_blocknr = ntohs(data->blocknr);
+      printf("%d -- %d\n", received_blocknr, tc->blocknr);
+      if((tc->blocknr+1) == received_blocknr){
+	fwrite(data->data, 1, len, tc->fp);
+	if(len < BLOCK_SIZE) {
+	  loopend = 0;
+	}
+	//tc->blocknr = receieved_blocknr;
+	tc->blocknr++;
+	tftp_send_ack(tc);
+	memset(data->data, '\0', sizeof(data->data));
+	memset(tc->msgbuf, '\0', sizeof(tc->msgbuf));
+      } else {
+	tftp_send_ack(tc);
       }
-     
-      long int cur_pos = ftell(tc->fp);
-      fwrite(data->data, len, 1, tc->fp);
-      long int new_pos = ftell(tc->fp);
-      int bytes_written = new_pos - cur_pos;
-      if(bytes_written < BLOCK_SIZE) {
-        loopend = 0;
-      }
-      printf("size check: %d\n", bytes_written);
-      //printf("length check: %ld\n", (file_w_pos - last_file_pos));
-      //last_file_pos = file_w_pos;
-      tc->blocknr = ntohs(data->blocknr);
-      //printf("block %u\n", tc->blocknr);
-      tftp_send_ack(tc);
-      memset(data->data, '\0', sizeof(data->data));
-      memset(tc->msgbuf, '\0', sizeof(tc->msgbuf));
+	
       break;
     case OPCODE_ACK:
       /* Received ACK, send next block */
-      tc->blocknr++;
-      long int file_pos = ftell(tc->fp);
-      if (file_size - file_pos < BLOCK_SIZE) {
-	     retval = tftp_send_data(tc, file_size - file_pos);
-	     loopend = 0;
+      ack_recv = (struct tftp_ack *) tc->msgbuf;
+      received_blocknr = ntohs(ack_recv->blocknr);
+      //printf("recieved blocknr: %d\n", received_blocknr);
+      //printf("tc block: %d\n", tc->blocknr);
+      if(received_blocknr == tc->blocknr){
+	tc->blocknr++;
+	long int file_pos = ftell(tc->fp);
+	printf("size: %ld\n", (file_size - file_pos));
+	if (file_size - file_pos < BLOCK_SIZE) {
+	  retval = tftp_send_data(tc, file_size - file_pos);
+	  loopend = 0;
+	} else {
+	  retval = tftp_send_data(tc, BLOCK_SIZE);
+	}
+	printf("tc sent: %d\n", tc->blocknr);
       } else {
-	     retval = tftp_send_data(tc, BLOCK_SIZE);
+	retval = tftp_send_data(tc, -1);
+	printf("wrong ack\n");
       }
       break;
     case OPCODE_ERR:
       /* Handle error... */
+      printf("error\n");
 
       // Do something clever
 
@@ -410,6 +429,7 @@ int tftp_transfer(struct tftp_conn *tc)
 
     /* ===ADDED=== */
     if (retval == -1) {
+      printf("retval = -1\n");
       // Handle this
     } else {
       totlen += retval;
