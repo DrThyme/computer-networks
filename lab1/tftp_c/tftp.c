@@ -391,7 +391,7 @@ int tftp_transfer(struct tftp_conn *tc)
 	  }
 	}
       } else {
-	retval = tftp_send_data(tc, -1);
+	retval = tftp_send_data(tc, -len);
       }
       len = retval;
       break;
