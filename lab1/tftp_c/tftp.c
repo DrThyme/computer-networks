@@ -158,9 +158,9 @@ int tftp_send_rrq(struct tftp_conn *tc)
   rrq = malloc(TFTP_RRQ_LEN(tc->fname,tc->mode));
 
   rrq->opcode = htons(OPCODE_RRQ);
-  int index = snprintf(rrq->req, BLOCK_SIZE, "%s", tc->fname);
+  int index = sprintf(rrq->req, "%s", tc->fname);
   index++;
-  snprintf((rrq->req + index), (BLOCK_SIZE - index - 1), "%s", tc->mode);
+  sprintf((rrq->req + index), "%s", tc->mode);
 
   int bytes_sent = sendto(tc->sock, rrq, TFTP_RRQ_LEN(tc->fname, tc->mode), 0,
 			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
@@ -209,17 +209,14 @@ int tftp_send_ack(struct tftp_conn *tc)
 {
 
   /* ===ADDED/CHANGED=== */
-  struct tftp_ack *ack;
-  ack = malloc(TFTP_ACK_HDR_LEN);
-
+  struct tftp_ack ack;
   
-  ack->opcode = htons(OPCODE_ACK);
-  ack->blocknr = htons(tc->blocknr);
+  ack.opcode = htons(OPCODE_ACK);
+  ack.blocknr = htons(tc->blocknr);
 
-  int bytes_sent = sendto(tc->sock, ack, TFTP_ACK_HDR_LEN, 0,
+  int bytes_sent = sendto(tc->sock, &ack, TFTP_ACK_HDR_LEN, 0,
 			  (struct sockaddr *) &(tc->peer_addr), tc->addrlen);
 
-  free(ack);
   return bytes_sent;
   /* ===END OF ADDED/CHANGED=== */
 }
@@ -241,7 +238,6 @@ int tftp_send_data(struct tftp_conn *tc, int length)
 {
   /* ===ADDED/CHANGED=== */
   struct tftp_data *tdata;
-  tdata = malloc(TFTP_DATA_HDR_LEN+length);
   
   int bytes_sent;
 
@@ -249,6 +245,7 @@ int tftp_send_data(struct tftp_conn *tc, int length)
     bytes_sent = sendto(tc->sock, tc->msgbuf, (-length), 0,
 			(struct sockaddr *) &(tc->peer_addr), tc->addrlen);
   } else {
+    tdata = malloc(TFTP_DATA_HDR_LEN+length);
     tdata->opcode = htons(OPCODE_DATA);
     tdata->blocknr = htons(tc->blocknr);
 
@@ -257,8 +254,8 @@ int tftp_send_data(struct tftp_conn *tc, int length)
     memcpy(tc->msgbuf, tdata, TFTP_DATA_HDR_LEN+length);
     bytes_sent = sendto(tc->sock, tdata, TFTP_DATA_HDR_LEN+length, 0,
 			(struct sockaddr *) &(tc->peer_addr), tc->addrlen);
+    free(tdata);
   }
-  free(tdata);
   return bytes_sent;
   /* ===END OF ADDED/CHANGED=== */
 }
@@ -275,7 +272,9 @@ int tftp_transfer(struct tftp_conn *tc)
   struct timeval timeout;
 
   int loopend = 1;
-
+  int final_pkt = 0;
+  int first_rrq = 1;
+  int first_wrq = 1;
   /* Sanity check */
   if (!tc)
     return -1;
@@ -319,7 +318,6 @@ int tftp_transfer(struct tftp_conn *tc)
   */
 
   int all_done = 0;
- reloop:
   do {
     /* 1. Wait for something from the server (using
      * 'select'). If a timeout occurs, resend last block
@@ -335,11 +333,21 @@ int tftp_transfer(struct tftp_conn *tc)
 			(struct sockaddr *) &tc->peer_addr, &tc->addrlen);
     } else { // Timeout
       if (tc->type == TFTP_TYPE_PUT) {
-        retval = tftp_send_data(tc, -len);
-        goto reloop;
+	if (first_wrq == 1) {
+	  retval = tftp_send_wrq(tc);
+	} else {
+	  retval = tftp_send_data(tc, -len);
+	}
+        continue;
       } else if (tc->type == TFTP_TYPE_GET) {
-        retval = tftp_send_ack(tc);
-        goto reloop; 
+	if (first_rrq == 1) {
+	  retval = tftp_send_rrq(tc);
+	} else if(final_pkt == 1) {
+	  break;
+	} else {
+	  retval = tftp_send_ack(tc);
+	}
+	continue;
       }
     }
     /* ===END OF ADDED=== */
@@ -360,18 +368,17 @@ int tftp_transfer(struct tftp_conn *tc)
       /* Received data block, send ack */
       data = (struct tftp_data *) tc->msgbuf;
       totlen += retval;
-      len = retval - 4;
+      len = retval - TFTP_DATA_HDR_LEN;
       received_blocknr = ntohs(data->blocknr);
       if((tc->blocknr+1) == received_blocknr){
 	fwrite(data->data, 1, len, tc->fp);
 	if(len < BLOCK_SIZE) {
-	  loopend = 0;
+	  final_pkt = 1;
 	}
 	tc->blocknr++;
-	retval = tftp_send_ack(tc);
-      } else {
-	retval = tftp_send_ack(tc);
       }
+      retval = tftp_send_ack(tc);
+      first_rrq = 0;
       break;
     case OPCODE_ACK:
       /* Received ACK, send next block */
@@ -394,6 +401,7 @@ int tftp_transfer(struct tftp_conn *tc)
 	retval = tftp_send_data(tc, -len);
       }
       len = retval;
+      first_wrq = 0;
       break;
     case OPCODE_ERR:
       err_recv = (struct tftp_err *) tc->msgbuf;
@@ -414,7 +422,6 @@ int tftp_transfer(struct tftp_conn *tc)
     /* ===CHANGED=== */
   } while (loopend /* 3. Loop until file is finished */);
   /* ===END OF CHANGED=== */
-  // done:
   printf("\nTotal data bytes sent/received: %d.\n", totlen);
  out:
   return retval;
